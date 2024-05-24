@@ -36,7 +36,7 @@ def ButtonTest():
 if __name__=="__main__":
     client = mqtt.Client()
     client.on_connect = on_connect
-    client.connect("broker.emqx.io",1883,10)
+    client.connect("CHECK FOR PROJECT HANDOVER FOR MQTT SERVER",1883,10)
     try:
         while True:
             ButtonTest()
