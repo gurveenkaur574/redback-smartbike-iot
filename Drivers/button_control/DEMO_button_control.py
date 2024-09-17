@@ -66,10 +66,15 @@ class Button():
         self._state = 0
         self._topic = args.button_topic 
         self._control_topic = args.button_topic + '/report'
+        self._to_publish = False
 
         # set up pin & callbacks
         GPIO.setup(self._pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         GPIO.add_event_detect(self._pin, GPIO.BOTH, callback=self.state_change, bouncetime=50)
+
+        # threading
+        self.publish_loop_thread = threading.Thread(name=f'{self._name}_publish_thread',target=self.publish_loop)
+        self.publish_loop_thread.start()
 
         logger.info(f'initialised {self._name} button')
     
@@ -77,16 +82,25 @@ class Button():
         """the callback passes the pin for some reason."""
         # grab the current state
         self._state = GPIO.input(self._pin)
+        self._to_publish = True
 
-        # publish to MQTT
-        if self._state == 1:
-            payload = self._name
-            logger.debug(f'{self._name} button pressed') 
-        else:
-            payload = 'LOW'
-            logger.debug(f'{self._name} button released')
+    def publish_loop(self):
 
-        self._client.publish(self._control_topic, payload)
+        while True:
+            if self._to_publish:
+
+                # publish to MQTT
+                if self._state == 1:
+                    payload = self._name
+                    logger.debug(f'{self._name} button pressed') 
+                else:
+                    payload = 'LOW'
+                    logger.debug(f'{self._name} button released')
+
+                self._client.publish(self._control_topic, payload)
+                self._to_publish = False
+
+            time.sleep(0.2)
                
 def main():
     # set up MQTT client
