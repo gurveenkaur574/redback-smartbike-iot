@@ -29,6 +29,16 @@ logger_stream_handler = logging.StreamHandler() # this will print all logs to th
 logger.addHandler(logger_file_handler)
 logger.addHandler(logger_stream_handler)
 
+# log unhandled exceptions
+def handle_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+sys.excepthook = handle_exception
+
 # define pins
 RIGHT_PIN = 11
 LEFT_PIN = 12
@@ -58,7 +68,7 @@ class Button():
 
         # set up pin & callbacks
         GPIO.setup(self._pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-        GPIO.add_event_detect(self._pin, GPIO.BOTH, callback=self.state_change, bouncetime=200)
+        GPIO.add_event_detect(self._pin, GPIO.BOTH, callback=self.state_change, bouncetime=50)
 
         logger.info(f'initialised {self._name} button')
     
@@ -89,6 +99,8 @@ def main():
     left_button = Button(LEFT_PIN, 'LEFT', client)
     right_button = Button(RIGHT_PIN, 'RIGHT', client)
     break_button = Button(BREAK_PIN, 'BREAK', client)
+
+    client.loop_forever()
 
     # loop until terminated
     # TODO: is this actually ok to do?
