@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import sys
 import time
 import paho.mqtt.client as paho
 from paho import mqtt
@@ -19,6 +20,16 @@ logger_stream_handler = logging.StreamHandler() # this will print all logs to th
 
 logger.addHandler(logger_file_handler)
 logger.addHandler(logger_stream_handler)
+
+# log unhandled exceptions
+def handle_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+sys.excepthook = handle_exception
 
 # this is a MQTT client that is able to publish to and subscribe from MQTT topics
 class MQTTClient:
@@ -88,3 +99,14 @@ class MQTTClient:
     def on_disconnect(self, client, userdata,rc=0):
         logger.info(f"Disconnected result code: {str(rc)}")
         self.client.loop_stop()
+
+if __name__ == '__main__':
+
+    MQTT_HOST = ''
+    MQTT_USER = ''
+    MQTT_PASS = ''
+    MQTT_PORT = 1883
+
+    client = MQTTClient(MQTT_HOST, MQTT_USER, MQTT_PASS, MQTT_PORT)
+    client.setup_mqtt_client()
+    client.loop_forever()
