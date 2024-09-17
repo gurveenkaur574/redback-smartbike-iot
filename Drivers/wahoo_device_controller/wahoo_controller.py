@@ -2,7 +2,7 @@ from pickle import TRUE
 import re
 import os
 import sys
-import gatt
+#import gatt # this version lacks descriptors
 import platform
 import json
 import time
@@ -16,6 +16,7 @@ sys.path.append(root_folder)
 from lib.mqtt_client import MQTTClient
 from lib.ble_helper import convert_incline_to_op_value, service_or_characteristic_found, service_or_characteristic_found_full_match, decode_int_bytes, covert_negative_value_to_valid_bytes
 from lib.constants import RESISTANCE_MIN, RESISTANCE_MAX, INCLINE_MIN, INCLINE_MAX, FAN_MIN, FAN_MAX, FTMS_UUID, FTMS_CONTROL_POINT_UUID, FTMS_REQUEST_CONTROL, FTMS_RESET, FTMS_SET_TARGET_RESISTANCE_LEVEL, INCLINE_REQUEST_CONTROL, INCLINE_CONTROL_OP_CODE, INCLINE_CONTROL_SERVICE_UUID, INCLINE_CONTROL_CHARACTERISTIC_UUID, INDOOR_BIKE_DATA_UUID, DEVICE_UNIT_NAMES, FTMS_SET_TARGET_FAN_SPEED
+import lib.gatt.gatt_linux as gatt
 
 """
 TODO design testing of changes for
@@ -263,7 +264,12 @@ class WahooController(GATTInterface):
             for characteristic in service.characteristics:
                 self.set_service_or_characteristic(characteristic)
                 print("[%s]\t\tCharacteristic [%s]" % (self.mac_address, characteristic.uuid))
-                print("The characteristic value is: ", characteristic.read_value())
+                if characteristic.read_value() != None:
+                    try:
+                        characteristic_value = ''.join([str(v) for v in characteristic.read_value()])
+                    except:
+                        characteristic_value = ''.join([str(int(v)) for v in characteristic.read_value()])
+                    print("The characteristic value is: ", characteristic_value)
 
                 # TODO: check if it is necessary to filter by service - if so rewrite set_service_or_characteristic to take a service arg
                 """
@@ -274,6 +280,16 @@ class WahooController(GATTInterface):
                     # set for custom control point for incline control
                     self.set_service_or_characteristic(characteristic)
                 """
+
+        """TODO REMOVE THIS
+        Testing to accessing descriptors"""
+        """for service in self.services:
+            for characteristic in service.characteristics:
+                for descriptor in characteristic.descriptors:
+                    descriptor_value = descriptor.read_value()
+                    #descriptor_value = bytearray(descriptor_value).decode()
+                    print(f'Characteristic: {characteristic.uuid}\nDescriptor: {descriptor_value}')
+        sys.exit()"""
 
         # continue if FTMS service is found from the BLE device
         if self.ftms and self.indoor_bike_data:

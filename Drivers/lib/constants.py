@@ -1,19 +1,23 @@
 ##### Section 1: MQTT Topics #####
-BIKE_01_INCLINE_COMMAND = 'bike/000001/incline'
-BIKE_01_RESISTANCE_COMMAND = 'bike/000001/resistance'
+BIKE_01_INCLINE_COMMAND = 'bike/000001/incline/control'
+BIKE_01_RESISTANCE_COMMAND = 'bike/000001/resistance/control'
+BIKE_01_FAN_COMMAND = 'bike/000001/fan/control'
 BIKE_01_INCLINE_REPORT = 'bike/000001/incline/report'
 BIKE_01_RESISTANCE_REPORT = 'bike/000001/resistance/report'
-BIKE_01_SPEED_REPORT = 'bike/000001/speed'
-BIKE_01_CADENCE_REPORT = 'bike/000001/cadence'
-BIKE_01_POWER_REPORT = 'bike/000001/power'
+BIKE_01_FAN_REPORT = 'bike/000001/fan/report'
+BIKE_01_SPEED_REPORT = 'bike/000001/speed/report'
+BIKE_01_CADENCE_REPORT = 'bike/000001/cadence/report'
+BIKE_01_POWER_REPORT = 'bike/000001/power/report'
 
-BIKE_02_INCLINE_COMMAND = 'bike/000002/incline'
-BIKE_02_RESISTANCE_COMMAND = 'bike/000002/resistance'
+BIKE_02_INCLINE_COMMAND = 'bike/000002/incline/control'
+BIKE_02_RESISTANCE_COMMAND = 'bike/000002/resistance/control'
+BIKE_02_FAN_COMMAND = 'bike/000002/fan/control'
 BIKE_02_INCLINE_REPORT = 'bike/000002/incline/report'
 BIKE_02_RESISTANCE_REPORT = 'bike/000002/resistance/report'
-BIKE_02_SPEED_REPORT = 'bike/000002/speed'
-BIKE_02_CADENCE_REPORT = 'bike/000002/cadence'
-BIKE_02_POWER_REPORT = 'bike/000002/power'
+BIKE_02_FAN_REPORT = 'bike/000002/fan/report'
+BIKE_02_SPEED_REPORT = 'bike/000002/speed/report'
+BIKE_02_CADENCE_REPORT = 'bike/000002/cadence/report'
+BIKE_02_POWER_REPORT = 'bike/000002/power/report'
 
 ##### Section 2: BLE devices reserved UUIDs #####
 # More BLE specification details can be found at: https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0 and https://github.com/oesmith/gatt-xml
@@ -51,7 +55,7 @@ HEART_RATE_MEASUREMENT_UUID = 0X2A37
 # Fitness Machine Control Point Op Codes (more details in https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0)
 FTMS_REQUEST_CONTROL = 0x00
 FTMS_RESET = 0x01
-FTMS_SET_TARGET_SPEED = 0x02
+FTMS_SET_TARGET_FAN_SPEED = 0x02
 FTMS_SET_TARGET_INCLINATION = 0x03
 FTMS_SET_TARGET_RESISTANCE_LEVEL = 0x04
 FTMS_SET_TARGET_POWER = 0x05
@@ -90,6 +94,7 @@ INCLINE_CONTROL_INCREMENT_UNIT = 50 # the incline value is up or down by 50 unit
 BIKE_01_KICKR_TRAINER_ADDRESS = "d9:07:e8:1c:db:94"
 BIKE_01_KICKR_CLIMB_ADDRESS = "cf:5c:f0:0d:c7:68"
 BIKE_01_HEADWIND_ADDRESS = "ed:cb:f5:da:d3:f5"
+BIKE_01_TICKR_HEARTRATE_ADDRESS = "ec:b2:8a:26:85:c5"
 
 ##### Section 4: Other Constants #####
 # TODO: set the correct resistance and inclination range values once we've got the real Wahoo device data
@@ -99,6 +104,9 @@ RESISTANCE_MAX = 100 # 100% resistance
 INCLINE_MIN = -10 # -10% incline down
 INCLINE_FLAT = 0 # 0% incline flat
 INCLINE_MAX = 19 # 19% incline up
+
+FAN_MIN = 0
+FAN_MAX = 100
 
 MIN_BYTE_VALUE = 0
 MAX_BYTE_VALUE = 256
@@ -111,4 +119,6 @@ DEVICE_UNIT_NAMES = {
   "resistance": "percentage",
   "incline": "degree",
   "headWind": "percentage"
+  "climber": "degree",
+  "fan": "percentage"
 }
