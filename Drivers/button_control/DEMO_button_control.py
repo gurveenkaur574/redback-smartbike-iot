@@ -101,7 +101,7 @@ class Button():
                 self._client.publish(self._control_topic, payload)
                 self._to_publish = False
 
-            time.sleep(0.3)
+            time.sleep(0.15)
                
 def main():
     # set up MQTT client

@@ -2,13 +2,18 @@
 
 import os
 import sys
-import paho.mqtt.client as mqtt
 import RPi.GPIO as GPIO
 import time
 import json
 from argparse import ArgumentParser
 import logging
-import threading
+
+"""
+FIXME:
+This code will fail if using the HiveMQ broker.
+Switch to the VM's broker or use the DEMO_button_control.py program instead.
+DO NOT change this code as a solution - this is an issue with HiveMQ.
+"""
 
 # append this file's directory to path
 root_folder = os.path.abspath(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -65,16 +70,12 @@ class Button():
         self._client = client
         self._state = 0
         self._topic = args.button_topic 
-        self._control_topic = args.button_topic + '/report'
+        self._report_topic = args.button_topic + '/report'
         self._to_publish = False
 
         # set up pin & callbacks
         GPIO.setup(self._pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-        GPIO.add_event_detect(self._pin, GPIO.BOTH, callback=self.state_change, bouncetime=50)
-
-        # threading
-        self.publish_loop_thread = threading.Thread(name=f'{self._name}_publish_thread',target=self.publish_loop)
-        self.publish_loop_thread.start()
+        GPIO.add_event_detect(self._pin, GPIO.BOTH, callback=self.state_change, bouncetime=75)
 
         logger.info(f'initialised {self._name} button')
     
@@ -82,27 +83,16 @@ class Button():
         """the callback passes the pin for some reason."""
         # grab the current state
         self._state = GPIO.input(self._pin)
-        self._to_publish = True
 
-    def publish_loop(self):
+        # publish to MQTT
+        payload = json.dumps({'button' : self._name, 'state' : self._state, 'timestamp' : time.time()})
+        self._client.publish(self._report_topic, payload)
 
-        while True:
-            if self._to_publish:
-
-                # publish to MQTT
-                payload = json.dumps({'button' : self._name, 'state' : self._state, 'timestamp' : time.time()})
-                self._client.publish(self._control_topic, payload)
-
-                # log the change
-                if self._state == 0:
-                    logger.debug(f'{self._name} button released')
-                elif self._state == 1:
-                    logger.debug(f'{self._name} button pressed')   
-
-                self._client.publish(self._control_topic, payload)
-                self._to_publish = False
-
-            time.sleep(0.2)
+        # log the change
+        if self._state == 0:
+            logger.debug(f'{self._name} button released')
+        elif self._state == 1:
+            logger.debug(f'{self._name} button pressed')  
 
 def main():
     # set up MQTT client
@@ -124,10 +114,9 @@ def main():
     try:
         while True:
             pass
-
     except KeyboardInterrupt:
         GPIO.cleanup()  
-        #client.disconnect()
+        client.disconnect()
    
 if __name__=="__main__":
     main()
