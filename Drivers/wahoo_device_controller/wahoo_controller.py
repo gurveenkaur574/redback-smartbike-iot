@@ -265,11 +265,11 @@ class WahooController(GATTInterface):
                 self.set_service_or_characteristic(characteristic)
                 print("[%s]\t\tCharacteristic [%s]" % (self.mac_address, characteristic.uuid))
                 if characteristic.read_value() != None:
-                    try:
+                    """try:
                         characteristic_value = ''.join([str(v) for v in characteristic.read_value()])
                     except:
-                        characteristic_value = ''.join([str(int(v)) for v in characteristic.read_value()])
-                    print("The characteristic value is: ", characteristic_value)
+                        characteristic_value = ''.join([str(int(v)) for v in characteristic.read_value()])"""
+                    print("The characteristic value is: ", characteristic.read_value())
 
                 # TODO: check if it is necessary to filter by service - if so rewrite set_service_or_characteristic to take a service arg
                 """
@@ -396,7 +396,6 @@ class WahooDevice:
         # on failed write try writing again until timeout
         elif response_type == WRITE_FAIL:
             self.write_timeout_count += 1
-            self.write_thread.start()
             logger.debug(f'{self._name} WRITE FAILED: {self._new_internal_value}')
 
         # TODO: Add check that we are notifying the correct characteristic - handling error responses
