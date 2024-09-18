@@ -96,9 +96,12 @@ class MQTTClient:
     def on_message(self, client, userdata, msg):
         logger.debug(msg.topic + " " + str(msg.qos) + " " + str(msg.payload))
     
-    def on_disconnect(self, client, userdata,rc=0):
+    def on_disconnect(self, client, userdata, rc, properties):
         logger.info(f"Disconnected result code: {str(rc)}")
-        self.client.loop_stop()
+        if rc == 0:
+            self.client.loop_stop()
+        elif rc > 0:
+            self.client.reconnect()
 
 if __name__ == '__main__':
 
