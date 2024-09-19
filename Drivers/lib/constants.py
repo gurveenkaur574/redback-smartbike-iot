@@ -118,7 +118,7 @@ DEVICE_UNIT_NAMES = {
   "heartRate": "BPM",
   "resistance": "percentage",
   "incline": "degree",
-  "headWind": "percentage"
+  "headWind": "percentage",
   "climber": "degree",
   "fan": "percentage"
 }
