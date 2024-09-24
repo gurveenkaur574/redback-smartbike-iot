@@ -71,7 +71,6 @@ class Button():
         self._state = 0
         self._topic = args.button_topic 
         self._report_topic = args.button_topic + '/report'
-        self._to_publish = False
 
         # set up pin & callbacks
         GPIO.setup(self._pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
