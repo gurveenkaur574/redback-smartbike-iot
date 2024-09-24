@@ -42,6 +42,16 @@ logger_stream_handler = logging.StreamHandler() # this will print all logs to th
 logger.addHandler(logger_file_handler)
 logger.addHandler(logger_stream_handler)
 
+# log unhandled exceptions
+def handle_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+sys.excepthook = handle_exception
+
 # define Control Point response type constants
 WRITE_SUCCESS, WRITE_FAIL, NOTIFICATION_SUCCESS, NOTIFICATION_FAIL = range(4)
 
