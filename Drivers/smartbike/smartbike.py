@@ -1,4 +1,5 @@
-from pickle import TRUE
+#!/usr/bin/env python3
+
 import re
 import os
 import sys
@@ -6,7 +7,7 @@ import sys
 import platform
 import json
 import time
-from time import sleep
+from argparse import ArgumentParser
 import threading
 import logging
 
@@ -19,26 +20,11 @@ from lib.constants import RESISTANCE_MIN, RESISTANCE_MAX, INCLINE_MIN, INCLINE_M
 import lib.gatt.gatt_linux as gatt
 
 """
-TODO design testing of changes for
-    - Test logger
-    - Test FTMS connect
-    - Test climb
-
-TODO complete first stage code for testing
-    - Complete WahooController essential code
-        0 FTMS control point request
-        0 FTMS reset [Check if this is necessary]
-        0 services_resolved
-    - Complete WahooController and Climb compatibility
-    - Add thread LOCK to Climb
-
-TODO complete wahoo_device.py equivalence
-    - Resistance compatibility
-    - WahooData
-
-TODO merge other Wahoo devices
-    - Fan
-    - Add heart monitor data report to WahooData
+TODO:
+    - integrate climb, resistance and WahooData code into KICKRDevice code
+    - make WahooDevice more general to be applied to Fan and TICKR drivers
+    - add critical error logging code
+    - move argparse, manager, and device connect code to main()
 """
 
 # setup logging
@@ -55,6 +41,16 @@ logger_stream_handler = logging.StreamHandler() # this will print all logs to th
 
 logger.addHandler(logger_file_handler)
 logger.addHandler(logger_stream_handler)
+
+# log unhandled exceptions
+def handle_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+sys.excepthook = handle_exception
 
 # define Control Point response type constants
 WRITE_SUCCESS, WRITE_FAIL, NOTIFICATION_SUCCESS, NOTIFICATION_FAIL = range(4)
@@ -79,18 +75,18 @@ WRITE_SUCCESS, WRITE_FAIL, NOTIFICATION_SUCCESS, NOTIFICATION_FAIL = range(4)
             self.stop_discovery()"""
 
 # extend on_message method to pass messages to device
-class MQTTClientWithSendingFTMSCommands(MQTTClient):
+class DeviceMQTTClient(MQTTClient):
     def __init__(self, broker_address, username, password, device, port=1883):
         super().__init__(broker_address, username, password, port=port)
         self.device = device
 
     def on_message(self, client, userdata, msg):
-        super().on_message(client,userdata, msg)
+        super().on_message(client, userdata, msg)
         self.device.on_message(msg)
 
 # ======== GATT Interface Class ========
 
-class GATTInterface(gatt.Device):
+class WahooDevice(gatt.Device):
     """This class should handle GATT functionality, including:
     * Connection
     * Response logging
@@ -99,32 +95,19 @@ class GATTInterface(gatt.Device):
     def __init__(self, mac_address, manager, args, managed=True):
         super().__init__(mac_address, manager, managed)
 
-        # Fitness Machine Service device & control point
-        self.ftms = None
-        self.ftms_control_point = None
-
-        # bike data characteristic
-        self.indoor_bike_data = None
-
         # CLI parser arguments
         self.args = args
 
-    def set_service_or_characteristic(self, service_or_characteristic):
+        # MQTT client
+        self.setup_mqtt_client()
 
-        # find services & characteristics of the KICKR trainer
-        if service_or_characteristic_found(FTMS_UUID, service_or_characteristic.uuid):
-            self.ftms = service_or_characteristic
-            logger.info('FTMS service found')
-        elif service_or_characteristic_found(FTMS_CONTROL_POINT_UUID, service_or_characteristic.uuid):
-            self.ftms_control_point = service_or_characteristic
-            logger.info('CONTROL POINT characteristic found')
-        elif service_or_characteristic_found(INDOOR_BIKE_DATA_UUID, service_or_characteristic.uuid):
-            self.indoor_bike_data = service_or_characteristic
-            logger.info('INDOOR BIKE DATA characteristic found')
-            self.indoor_bike_data.enable_notifications()
+    def set_service_or_characteristic(self, service_or_characteristic):
+        """Match services and characteristics using their UUIDs
+        
+        virtual method to be implemented by subclass"""
+        pass
 
     # ====== Log connection & characteristic update ======
-    # TODO: check if those supers do anything - fairly certain they are virtual methods
 
     def connect_succeeded(self):
         super().connect_succeeded()
@@ -164,54 +147,16 @@ class GATTInterface(gatt.Device):
 
     def characteristic_enable_notification_failed(self, characteristic, error):
         logger.debug(f"Cannot enable notification for {characteristic.uuid}: {str(error)}")
-        self.control_point_response(characteristic,response_type=NOTIFICATION_FAIL,error=error)  
-    
-    # ====== Request & Resolve control point
-    def services_resolved(self):
-        super().services_resolved()
-
-# ======== Wahoo Controller Class ========
-
-class WahooController(GATTInterface):
-    """This sub-class should extend the GATTInterface class to also handle:
-    * MQTT [or any alternative networking protocols]
-    * Individual Wahoo devices
-    * Pulling data from devices"""
-
-    def __init__(self, mac_address, manager, args, managed=True):
-        super().__init__(mac_address, manager, args, managed)
-
-        # CLI parser arguments
-        self.args = args
-
-        # MQTT client
-        self.setup_mqtt_client()
-
-        # Wahoo devices
-        self.climber = Climber(self,args)
-        self.resistance = Resistance(self,args)
-        self.fan = HeadwindFan(self,args)
-
-        self.devices = [self.climber, self.resistance, self.fan]
-
-        # Wahoo data handler
-        self.wahoo_data = WahooData(self,args)
+        self.control_point_response(characteristic,response_type=NOTIFICATION_FAIL,error=error)
 
     # ===== MQTT methods =====
     
     def setup_mqtt_client(self):
-        self.mqtt_client = MQTTClientWithSendingFTMSCommands(self.args.broker_address, self.args.username, self.args.password, self, port=self.args.port)
+        self.mqtt_client = DeviceMQTTClient(self.args.broker_address, self.args.username, self.args.password, self, port=self.args.port)
         self.mqtt_client.setup_mqtt_client()
-    
-    def on_message(self, msg):
-        """Run when a subscribed MQTT topic publishes"""
-        logger.info('MQTT message received')
-        for device in self.devices:
-            device.on_message(msg)
 
     def subscribe(self, topic: str, SubscribeOptions: int = 0):
         """Subscribe to a MQTT topic"""
-        logger.info(f'MQTT Subscribing to topic {topic}')
         self.mqtt_client.subscribe([(topic, SubscribeOptions)])
 
     def publish(self, topic: str, payload):
@@ -220,15 +165,78 @@ class WahooController(GATTInterface):
     
     def mqtt_data_report_payload(self, device_type, value):
         """Create a standardised payload for MQTT publishing"""
-        # TODO: add more json data payload whenever needed later
         return json.dumps({"value": value, "unitName": DEVICE_UNIT_NAMES[device_type], "timestamp": time.time(), "metadata": { "deviceName": platform.node() } })
+    
+    # ====== Request & Resolve control point
+    def services_resolved(self):
+        super().services_resolved()
+
+        print("[%s] Resolved services" % (self.mac_address))
+        for service in self.services:
+            print("[%s]\tService [%s]" % (self.mac_address, service.uuid))
+            self.set_service_or_characteristic(service)
+
+            for characteristic in service.characteristics:
+                self.set_service_or_characteristic(characteristic)
+                print("[%s]\t\tCharacteristic [%s]" % (self.mac_address, characteristic.uuid))
+                if characteristic.read_value() != None:
+                    print("The characteristic value is: ", characteristic.read_value())
+        
+        # start looping MQTT messages
+        self.mqtt_client.loop_start()
+
+# ======== Wahoo Controller Class ========
+
+class KICKRDevice(WahooDevice):
+    """This sub-class should extend the GATTInterface class to also handle:
+    * MQTT [or any alternative networking protocols]
+    * Individual Wahoo devices
+    * Pulling data from devices"""
+
+    def __init__(self, mac_address, manager, args, managed=True):
+        super().__init__(mac_address, manager, args, managed)
+
+        # Fitness Machine Service device & control point
+        self.ftms = None
+        self.ftms_control_point = None
+
+        # bike data characteristic
+        self.indoor_bike_data = None
+
+        # Wahoo sub-devices
+        self.climber = Climber(self,args)
+        self.resistance = Resistance(self,args)
+
+        self.devices = [self.climber, self.resistance]
+
+        # Wahoo data handler
+        self.wahoo_data = WahooData(self,args)
+
+    # ===== MQTT method for device ======
+
+    def on_message(self, msg):
+        """Run when a subscribed MQTT topic publishes"""
+        for device in self.devices:
+            device.on_message(msg)
 
     # ===== GATT for devices =====
 
     def set_service_or_characteristic(self, service_or_characteristic):
         super().set_service_or_characteristic(service_or_characteristic)
 
-        # TODO: add flow control by returning True if the service/characteristic was matched and then terminating the search
+        # find services & characteristics of the KICKR trainer
+        if service_or_characteristic_found(FTMS_UUID, service_or_characteristic.uuid):
+            self.ftms = service_or_characteristic
+            logger.info('FTMS service found')
+        elif service_or_characteristic_found(FTMS_CONTROL_POINT_UUID, service_or_characteristic.uuid):
+            self.ftms_control_point = service_or_characteristic
+            self.ftms_control_point.write_value(bytearray([FTMS_REQUEST_CONTROL])) # request control point
+            logger.info('CONTROL POINT characteristic found')
+        elif service_or_characteristic_found(INDOOR_BIKE_DATA_UUID, service_or_characteristic.uuid):
+            self.indoor_bike_data = service_or_characteristic
+            logger.info('INDOOR BIKE DATA characteristic found')
+            self.indoor_bike_data.enable_notifications()
+
         for device in self.devices:
             device.set_control_point(service_or_characteristic)
 
@@ -247,68 +255,12 @@ class WahooController(GATTInterface):
         for device in self.devices:
             device.control_point_response(characteristic, response_type, error)
 
-    # ===== Resolve control point & services/characteristics
+# ======== KICKR sub-device Classes ========
 
-    # this is the main process that will be run all time after manager.run() is called
-    # FIXME: despite what is stated above - this process is not looped - it runs only once in testing.
-    # Maybe it reruns it until all services & characteristics have been resolved?
-    # TODO: Double check all the below to ensure it is working and clean it up a bit
-    def services_resolved(self):
-        super().services_resolved()
+class SubDevice:
+    """Class for sub-device functionality like the KICKR Climb's incline control, KICKR smart trainer's resistance control"""
 
-        print("[%s] Resolved services" % (self.mac_address))
-        for service in self.services:
-            print("[%s]\tService [%s]" % (self.mac_address, service.uuid))
-            self.set_service_or_characteristic(service)
-
-            for characteristic in service.characteristics:
-                self.set_service_or_characteristic(characteristic)
-                print("[%s]\t\tCharacteristic [%s]" % (self.mac_address, characteristic.uuid))
-                if characteristic.read_value() != None:
-                    """try:
-                        characteristic_value = ''.join([str(v) for v in characteristic.read_value()])
-                    except:
-                        characteristic_value = ''.join([str(int(v)) for v in characteristic.read_value()])"""
-                    print("The characteristic value is: ", characteristic.read_value())
-
-                # TODO: check if it is necessary to filter by service - if so rewrite set_service_or_characteristic to take a service arg
-                """
-                if self.ftms == service:
-                    # set for FTMS control point for resistance control
-                    self.set_service_or_characteristic(characteristic)
-                if self.custom_incline_service == service:
-                    # set for custom control point for incline control
-                    self.set_service_or_characteristic(characteristic)
-                """
-
-        """TODO REMOVE THIS
-        Testing to accessing descriptors"""
-        """for service in self.services:
-            for characteristic in service.characteristics:
-                for descriptor in characteristic.descriptors:
-                    descriptor_value = descriptor.read_value()
-                    #descriptor_value = bytearray(descriptor_value).decode()
-                    print(f'Characteristic: {characteristic.uuid}\nDescriptor: {descriptor_value}')
-        sys.exit()"""
-
-        # continue if FTMS service is found from the BLE device
-        if self.ftms and self.indoor_bike_data:
-
-            # request control point
-            self.ftms_control_point.write_value(bytearray([FTMS_REQUEST_CONTROL]))
-
-            # start looping MQTT messages
-            self.mqtt_client.loop_start()
-
-
-
-
-# ======== Wahoo Device Classes ========
-
-class WahooDevice:
-    """A virtual class for Wahoo devices"""
-
-    def __init__(self, name: str, controller: WahooController, command_topic: str, report_topic: str):
+    def __init__(self, name: str, controller: KICKRDevice, command_topic: str, report_topic: str):
         """
         Create a Wahoo Device
 
@@ -398,7 +350,6 @@ class WahooDevice:
             self.write_timeout_count += 1
             logger.debug(f'{self._name} WRITE FAILED: {self._new_internal_value}')
 
-        # TODO: Add check that we are notifying the correct characteristic - handling error responses
         # on successful enabling of notification on control point log
         elif response_type == NOTIFICATION_SUCCESS:
             logger.debug(f'{self._name} NOTIFICATION SUCCESS')
@@ -432,10 +383,10 @@ class WahooDevice:
         if not (self.terminate_write and self.write_timeout_count >= self._TIMEOUT):
             self.control_point.write_value(self._new_write_value)
 
-class Climber(WahooDevice):
+class Climber(SubDevice):
     """Handles control of the KICKR Climb"""
 
-    def __init__(self, controller: WahooController, args):
+    def __init__(self, controller: KICKRDevice, args):
         super().__init__('CLIMBER',controller,args.incline_command_topic,args.incline_report_topic)
 
     def set_control_point(self, service_or_characteristic):
@@ -454,7 +405,7 @@ class Climber(WahooDevice):
         """Receive MQTT messages"""
         
         # check if it is the incline topic
-        if bool(re.search("/incline", msg.topic, re.IGNORECASE)):
+        if bool(re.search("/incline/control", msg.topic, re.IGNORECASE)):
 
             logger.info(f'{self._name} MQTT message received')
             logger.debug(f'Received Climber Message: {msg}')
@@ -474,10 +425,10 @@ class Climber(WahooDevice):
             # TODO: check and report other errors like wrong value type
 
 
-class Resistance(WahooDevice):
+class Resistance(SubDevice):
     """Handles control of the Resistance aspect of the KICKR Smart Trainer"""
 
-    def __init__(self, controller: WahooController, args):
+    def __init__(self, controller: KICKRDevice, args):
         super().__init__('Resistance',controller,args.resistance_command_topic,args.resistance_report_topic)
 
     def set_control_point(self, service_or_characteristic):
@@ -490,7 +441,7 @@ class Resistance(WahooDevice):
         """Receive MQTT messages"""
 
         # check if it is the resistance topic
-        if bool(re.search("/resistance", msg.topic, re.IGNORECASE)):
+        if bool(re.search("/resistance/control", msg.topic, re.IGNORECASE)):
 
             logger.info(f'{self._name} MQTT message received')
 
@@ -507,49 +458,10 @@ class Resistance(WahooDevice):
                 logger.info(f'{self._name} MQTT COMMAND FAIL : value must be an integer between 0 and 100 : {value}')
                 # TODO: report error
 
-
-# TODO: fan driver just writes values and hopes. Need to investigate fan for correct values - use bluetoothctl GATT operations
-class HeadwindFan(WahooDevice):
-    """Handles control of the KICKR Headwind Smart Bluetooth Fan"""
-
-    def __init__(self, controller: WahooController, args):
-        super().__init__('Fan',controller,args.fan_command_topic,args.fan_report_topic)
-
-    def set_control_point(self, service_or_characteristic):
-        pass
-
-    def on_message(self, msg):
-        """This needs fixing """
-            
-        # check if it is the fan topic
-        if bool(re.search("/fan", msg.topic, re.IGNORECASE)):
-
-            logger.info(f'{self._name} MQTT message received')
-
-            # convert, validate, and write the new value
-            value = str(msg.payload, 'utf-8')
-
-            # TODO: add error checking and reporting for converting from str to dict
-            value = json.loads(value)
-            value = int(value['power'])
-            if FAN_MIN <= value <= FAN_MAX and value % 1 == 0: # FIXME: replace 1 with correct resolution value
-                self._new_internal_value = value
-                self.write_value(bytearray([0x02, self._new_internal_value])) # FIXME: replace 0x02 with a value we are sure is correct
-            else:
-                logger.debug(f'{self._name} MQTT COMMAND FAIL : value must be in range 0 to 100 with UNKNOWN resolution : {value}') # FIXME: replace UNKNOWN with correct value
-                # TODO: report error
-
-"""
-Class to handle data from Wahoo devices. All data is streamed through the KICKR smart trainer so best handled by a single class.
-All code copied over from old code so it could use a clean up. 
-A lot of the processed data is not relevant - most are for Wahoo devices we do not have - but someone put the effort into developing
-those bits so might as well keep it in case we use it in the future.
-I think things could be cleaned up a lot on the pull_value method but need better undertsanding of handling bit data.
-"""
-
 class WahooData:
 
-    def __init__(self, controller: WahooController, args):
+    def __init__(self, controller: KICKRDevice, args):
+        """Pulls data from the KICKR"""
         
         # device controller
         self.controller = controller
@@ -721,3 +633,241 @@ class WahooData:
             self.controller.mqtt_client.publish(self.args.cadence_report_topic, self.controller.mqtt_data_report_payload('cadence', self.instantaneous_cadence))
         if self.flag_instantaneous_power:
             self.controller.mqtt_client.publish(self.args.power_report_topic, self.controller.mqtt_data_report_payload('power', self.instantaneous_power))
+
+# ======== TICKR Heart Rate Monitor driver ========
+
+class TICKRDevice(WahooDevice):
+
+    def __init__(self, mac_address, manager, args, managed=True):
+        super().__init__(mac_address, manager, args, managed)
+
+        # define service & characteristic
+        self.heart_rate_service = None
+        self.heart_rate_measurement_characteristic = None
+
+    def set_service_or_characteristic(self, service_or_characteristic):
+        super().set_service_or_characteristic(service_or_characteristic)
+
+        if service_or_characteristic.uuid[4:8] == '180d':
+            self.heart_rate_service = service_or_characteristic
+
+        if service_or_characteristic.uuid[4:8] == '2a37':
+            self.heart_rate_measurement_characteristic = service_or_characteristic
+            self.heart_rate_measurement_characteristic.enable_notifications()
+    
+    def characteristic_value_updated(self, characteristic, value):
+
+        # return if not TICKR characteristic
+        if characteristic.uuid != self.heart_rate_measurement_characteristic.uuid: return
+
+        # Store the timestamp
+        ts = time.time()
+
+        # Check the flags
+        hr16bit = value[0] & 1
+        sensorcontact = (value[0] & 6) >> 1
+        energyexpended = (value[0] & 8) >> 3
+        rrinterval = (value[0] & 16) >> 4
+
+        # Offset is the current byte in the packet being processed
+        offset = 1
+
+        # Parse the heartrate
+        if hr16bit:
+            heartrate = (value[offset+1] << 8) + value[offset]
+            offset += 2
+        else:
+            heartrate = value[offset]
+            offset += 1
+
+        #check for zero heartrate and if limit reached
+        if not(heartrate == 0 and self.zeroCount >= self.zero_limit):
+            # Parse the sensor contact information (if present)
+            if sensorcontact == 2:
+                contact = "Not detected"
+            elif sensorcontact == 3:
+                contact = "Detected"
+            else:
+                contact = None
+
+            #Parse heartrate to check if 0
+            if heartrate == 0:
+                self.zeroCount += 1
+            else:
+                self.zeroCount = 0
+
+            # Parse the energy expended (if present)
+            if energyexpended:
+                energy = (value[offset+1] << 8) + value[offset]
+                offset += 2
+            else:
+                energy = None
+
+            # Parse the RR interval(s) (if present)
+            # If several intervals have occurred since the last measurement
+            # they are sent from oldest to newest
+            if rrinterval:
+                interval = []
+                for index in range(offset, len(value), 2):
+                    interval.append(float((value[index+1] << 8) + value[index])/1024.0)
+                offset = len(value)
+            else:
+                interval = None
+
+            # publish measure
+            payload = self.mqtt_data_report_payload(heartrate, ts)
+            self.publish(self.args.heartrate_report_topic, payload)
+
+    def mqtt_data_report_payload(self, value, timestamp):
+        return json.dumps({"value": value, "unitName": 'BPM', "timestamp": timestamp, "metadata": { "deviceName": platform.node() } }) 
+
+"""
+FIXME: the fan code needs a total rewrite
+- The characteristics and values written to them are undocumented.
+- There is no real flow control - values are rewritten multiple times in the hope that the value write will succeed.
+"""
+class HeadwindFan(WahooDevice):
+
+    def __init__(self, mac_address, manager, args, managed=True):
+        super().__init__(mac_address, manager, args, managed)
+
+        # define services & characteristics
+        self.enable_service = None
+        self.enable_characteristic = None
+        self.fan_service = None
+        self.fan_characteristic = None
+
+        # write counts for "flow control"
+        self.enableCount = 0
+        self.startCount = 0
+        self.sendCount = 0
+
+    def on_message(self, msg):
+
+        # ignore if message is not from fan control topic
+        if not bool(re.search("/fan/control", msg.topic, re.IGNORECASE)): return
+
+        # extract value from payload
+        payload = msg.payload.decode("utf-8")
+        dict_of_payload = json.loads(payload)
+        fan_power = int(dict_of_payload["value"])
+
+        # abort if the value is not within 0% to 100%
+        if not (0 <= fan_power <= 100): return
+
+        # write new fan power value
+        if self.enableCount < 3:
+            value = bytes([0x20, 0xee, 0xfc])
+            self.enable_characteristic.write_value(value)
+        elif self.startCount < 3:
+            value = bytes([0x04, 0x04])
+            self.fan_characteristic.write_value(value)
+        else:
+            value = bytes([0x02, self.speed])
+            self.fan_characteristic.write_value(value)
+
+    def characteristic_write_value_succeeded(self, characteristic):
+        # repeat writes to increase chances of successful write
+        # FIXME: implement proper flow control using the control point responses
+        if characteristic == self.enable_characteristic:
+            if self.enableCount < 3:
+                value = bytes([0x20, 0xee, 0xfc])
+                self.enable_characteristic.write_value(value)
+                self.enableCount+=1
+            elif self.startCount < 3:
+                value = bytes([0x04, 0x04])
+                self.fan_characteristic.write_value(value)
+                self.startCount+=1
+        if characteristic == self.fan_characteristic:
+            if self.startCount < 3:
+                value = bytes([0x04, 0x04])
+                self.fan_characteristic.write_value(value)
+                self.startCount+=1
+            elif self.sendCount < 3:
+                value = bytes([0x02, self.speed])
+                self.fan_characteristic.write_value(value)
+                self.sendCount = self.sendCount + 1
+                if self.sendCount == 3:
+                    print(f"Speed set to {self.speed}")
+    
+    def set_service_or_characteristic(self, service_or_characteristic):
+        super().set_service_or_characteristic(service_or_characteristic)
+
+        if service_or_characteristic.uuid[4:8] == 'ee01':
+            self.enable_service = service_or_characteristic
+        
+        elif service_or_characteristic.uuid[4:8] == 'e002':
+            self.enable_characteristic = service_or_characteristic
+            self.enable_characteristic.enable_notifications()
+            value = bytes([0x20, 0xee, 0xfc])
+            self.enable_characteristic.write_value(value)
+        
+        elif service_or_characteristic.uuid[4:8] == 'ee0c':
+            self.fan_service = service_or_characteristic
+        
+        elif service_or_characteristic.uuid[4:8] == 'e038':
+            self.fan_characteristic = service_or_characteristic
+            self.fan_characteristic.enable_notifications()
+
+
+# ======== Main Process ========
+
+def main():
+    # define CLI parse arguments
+    parser = ArgumentParser(description="Wahoo Device Controller")
+
+    # BLE connection params
+    parser.add_argument('--kickr_mac_address', dest='kickr_mac_address', type=str, help="The KICKR smart trainer's mac address", default=os.getenv('KICKR_MAC_ADDRESS'))
+    parser.add_argument('--tickr_mac_address', dest='tickr_mac_address', type=str, help="The TICKR heart rate monitor's mac address", default=os.getenv('TICKR_MAC_ADDRESS'))
+    parser.add_argument('--fan_mac_address', dest='fan_mac_address', type=str, help="The headwind fan's mac address", default=os.getenv('FAN_MAC_ADDRESS'))
+
+    # MQTT connection params
+    parser.add_argument('--broker_address', dest='broker_address', type=str, help='The MQTT broker address', default=os.getenv('MQTT_HOSTNAME'))
+    parser.add_argument('--username', dest='username', type=str, help='username', default=os.getenv('MQTT_USERNAME'))
+    parser.add_argument('--password', dest='password', type=str, help='password', default=os.getenv('MQTT_PASSWORD'))
+    parser.add_argument('--port', dest='port', type=int, help='port', default=os.getenv('MQTT_PORT'))
+
+    DEVICE_ID = os.getenv('DEVICE_ID')
+
+    parser.add_argument('--incline_command_topic', dest='incline_command_topic', type=str, help='a MQTT topic that will send incline control commands to this driver', default=f'bike/{DEVICE_ID}/incline/control')
+    parser.add_argument('--incline_report_topic', dest='incline_report_topic', type=str, help='a MQTT topic that will receieve the current incline levels data from this driver', default=f'bike/{DEVICE_ID}/incline/report')
+    parser.add_argument('--resistance_command_topic', dest='resistance_command_topic', type=str, help='a MQTT topic that will send resistance control commands to this driver', default=f'bike/{DEVICE_ID}/resistance/control')
+    parser.add_argument('--resistance_report_topic', dest='resistance_report_topic', type=str, help='a MQTT topic that will receieve the current resistance levels data from this driver', default=f'bike/{DEVICE_ID}/resistance/report')
+    parser.add_argument('--fan_command_topic', dest='fan_command_topic', type=str, help='a MQTT topic that will send fan control commands to this driver', default=f'bike/{DEVICE_ID}/fan/control')
+    parser.add_argument('--fan_report_topic', dest='fan_report_topic', type=str, help='a MQTT topic that will receieve the current incline or resistance levels data from this driver', default=f'bike/{DEVICE_ID}/fan/report')
+    parser.add_argument('--speed_report_topic', dest='speed_report_topic', type=str, help='a MQTT topic that will receive the current instantaneous speed data in m/s from this driver', default=f'bike/{DEVICE_ID}/speed')
+    parser.add_argument('--cadence_report_topic', dest='cadence_report_topic', type=str, help='a MQTT topic that will receive the current instantaneous cadence data in rpm from this driver', default=f'bike/{DEVICE_ID}/cadence')
+    parser.add_argument('--power_report_topic', dest='power_report_topic', type=str, help='a MQTT topic that will receive the current instantaneous power data in W from this driver', default=f'bike/{DEVICE_ID}/power')
+    parser.add_argument('--heartrate_report_topic', dest='heartrate_report_topic', type=str, help='a MQTT topic that will receive the current heart rate data in BPM from this driver', default=f'bike/{DEVICE_ID}/heartrate')
+
+    args = parser.parse_args()
+
+    print("Connecting to the BLE device...")
+    manager = gatt.DeviceManager(adapter_name='hci0')
+
+    # initialise the KICKR, TICKR, and Fan drivers
+    kickr = KICKRDevice(args.kickr_mac_address, manager, args)
+    tickr = TICKRDevice(args.tickr_mac_address, manager, args)
+    headwind_fan = HeadwindFan(args.fan_mac_address, manager, args)
+
+    # connect to the devices
+    manager.start_discovery()
+    logger.info('connecting to KICKR')
+    kickr.connect()
+    logger.info('connecting to TICKR')
+    tickr.connect()
+    logger.info('connecting to Headwind Fan')
+    headwind_fan.connect()
+    manager.stop_discovery()
+
+    try:
+        print("Running the device manager now...")
+        # run the device manager in the main thread forever
+        manager.run()
+    except KeyboardInterrupt:
+        print ('Exit the program.')
+        manager.stop()
+        sys.exit(0)
+
+if __name__ == '__main__':
+    main()
