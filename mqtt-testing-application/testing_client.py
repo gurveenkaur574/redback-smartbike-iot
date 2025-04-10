@@ -1,3 +1,23 @@
+"""
+Smartbike MQTT Controller
+
+This script provides a command-line interface to control Smartbike IoT devices using MQTT. 
+It publishes commands for incline, resistance, fan speed, and workout selection, and can subscribe 
+to various feedback topics from the bike.
+
+Usage:
+1. Set MQTT credentials (host, user, password) in the USER SETTINGS section below.
+2. Add topics to SUBSCRIBED_TOPICS (e.g., ["#"] for all, or specific feedback topics).
+3. Run the script: `python3 controller.py`
+4. Follow the terminal prompts to send commands to the Smartbike.
+
+Project: Smartbike VR
+Author: Gurveen Kaur
+Date Created: April 2025
+Last Edited: April 2025
+Version: v1.1
+"""
+
 import sys
 import os
 import time
@@ -59,18 +79,45 @@ class MQTT_Controller:
         self._control_loop()
 
     def publish_incline(self,val):
+        """
+    Publishes an incline value to the Smartbike MQTT topic.
+
+    Args:
+        val (float): The incline percentage to set.
+    
+    Topic:
+        f"{BIKE_01_INCLINE_COMMAND}" (resolved via constants)
+    """
         payload = json.dumps({"incline" : val, "timestamp": time.time()})
         self.client.publish(INCLINE_TOPIC,payload)
 
     def publish_resistance(self,val):
+        """
+        Publishes a new resistance value to the Smartbike.
+
+        Args:
+            val (float): The resistance level to set.
+        """
         payload = json.dumps({"resistance" : val, "timestamp": time.time()})
         self.client.publish(RESISTANCE_TOPIC,payload)
 
     def publish_fan(self,val):
+        """
+        Publishes a new fan control value.
+
+        Args:
+            val (int or str): Fan level or toggle state.
+        """
         payload = json.dumps({"value" : val, "timestamp": time.time()})
         self.client.publish(FAN_TOPIC,payload)
     
     def publish_workout_selector(self,val):
+         """
+        Publishes a workout selection command.
+
+        Args:
+            val (str): The selected workout profile (e.g., "cardio", "hill").
+        """
         self.client.publish(WORKOUT_SELECTOR_TOPIC,val)
 
     def _control_input(self):
